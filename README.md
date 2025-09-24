@@ -32,6 +32,7 @@ Our code repository is built up on [nanoGPT](https://github.com/karpathy/nanoGPT
 - [FFA-LoRA](https://arxiv.org/abs/2403.12313) by Youbang Sun et al. 
 - Strategy 2 of [PCL](https://arxiv.org/abs/2404.09753) by Nicolas Wagner et al. 
 - An adapted version of [pFedMoE](https://arxiv.org/abs/2402.01350) by Liping Yi et al.
+- [FDLoRA](https://arxiv.org/abs/2406.07925) by Jiaxing Qi et al. 
 - Our CoMiGS method 
 
 
@@ -39,3 +40,4 @@ Our code repository is built up on [nanoGPT](https://github.com/karpathy/nanoGPT
 `Collab_runscripts` contains the experiment configurations used for the experiments in the paper. These serve as examples on how to configure the runs for `collab_run.py` experiments. 
 
 New methods can be implemented by extending `collab_utils/collaborations_strategies.py` and `collab_utils/aggregation_strategies.py`.
+
