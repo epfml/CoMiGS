@@ -3,7 +3,7 @@ import torch
 
 class Server(object):
     def __init__(self, args, model, config):
-        self.server_model = model.from_pretrained(args.base_model,config).to(args.device)
+        self.server_model = model.from_pretrained(args.base_model,config).to('cpu')
         self.args = args
         self.pruning_strength = args.pruning_strength
 
@@ -13,6 +13,7 @@ class Server(object):
 
         aggregation_strategy.init(uploaded_models, self.server_model.state_dict(), collaboration_strategy, self.pruning_strength, train_set_sizes)
         for client_rank, client_model in enumerate(uploaded_models):
+            client_model = client_model
             self._update_state(client_model, collaboration_strategy, aggregation_strategy, server_state, client_rank)
         self.load_adjusted_state_dict(server_state)
 

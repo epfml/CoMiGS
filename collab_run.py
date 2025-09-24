@@ -2,9 +2,9 @@ from tqdm import tqdm
 import argparse
 from collab_utils.clients import GeneralClient
 from collab_utils.server import Server
-from models.model import GPTConfig, GPT
-import numpy as np
+from models.model import GPT
 import random
+import numpy as np
 import torch 
 import os
 import ast
@@ -31,8 +31,8 @@ parser.add_argument('-en', '--expert_numbers', default='[2,2,2,2]', type=parse_l
 parser.add_argument('-k', '--topk', default=2,type=int)
 parser.add_argument('-as','--collaboration_strategy',default="all", type=str)
 parser.add_argument('-aggregation_strategy','--aggregation_strategy',default="default", type=str)
-parser.add_argument('-bs','--batch_size',default=64,type=int)
-parser.add_argument('-micro_bs','--micro_batch_size',default=8,type=int)
+parser.add_argument('-bs','--batch_size', default=64,type=int)
+parser.add_argument('-micro_bs','--micro_batch_size',default=64,type=int)
 parser.add_argument('-wandb','--wandb_log',action='store_true')
 parser.add_argument('-wandb_proj','--wandb_project',default="CoMoLE", type=str)
 parser.add_argument('-wandb_run_name','--wandb_run_name',default="test", type=str)
@@ -54,7 +54,10 @@ parser.add_argument('-alter_on_train','--alter_gate_update_on_train', action='st
 parser.add_argument('-bm','--base_model', default="gpt2", type=str)
 parser.add_argument('-is_alter','--is_alternating', action='store_true')
 parser.add_argument('-is_no_router','--is_no_router', action='store_true')
+parser.add_argument('-learning_rate_scale','--learning_rate_scale', default=1.0, type=float)
 args = parser.parse_args()
+
+num_gpus = 1
 
 assert len(args.expert_lora_ranks) == args.num_clients, f"Please specify lora rank for each client {args.expert_lora_ranks}."
 assert len(args.expert_numbers) == args.num_clients, f"Please specify number of expersts for each client {args.expert_numbers}."
@@ -72,10 +75,63 @@ print("is alternating updates:", args.is_alternating)
 print("alter_on_train:", args.alter_gate_update_on_train)
 
 def init_client_model(override_args):
-
-    model = GPT.from_pretrained(args.base_model, override_args)
-    model = get_ft_model(model, collaboration_strategy)
+    if args.base_model.startswith("gpt"):
+        model = GPT.from_pretrained(args.base_model, override_args)
+        model = get_ft_model(model, collaboration_strategy)
+    elif "llama" in args.base_model:
+        from models.modeling_llama_moe_hf import LlamaMoEForCausalLM
+        from models.configuration_llama_moe import LlamaMoEConfig
+        model = LlamaMoEForCausalLM.from_pretrained(args.base_model, LlamaMoEConfig(**override_args))
+        model = get_ft_model(model, collaboration_strategy) 
+    elif "SmolLM" in args.base_model:
+        from models.modeling_llama_moe_hf import LlamaMoEForCausalLM
+        from models.configuration_llama_moe import LlamaMoEConfig
+        smollm_args = {
+            "bos_token_id": 0,
+            "eos_token_id": 0,
+            "hidden_size": 960,
+            "intermediate_size": 2560,
+            "max_position_embeddings": 2048,
+            "num_attention_heads": 15,
+            "num_hidden_layers": 32,
+            "num_key_value_heads": 5,
+            "rope_theta": 10000.0,
+            "vocab_size": 49152
+        }
+        merged_args = {**smollm_args, **override_args}
+        model = LlamaMoEForCausalLM.from_pretrained(args.base_model, LlamaMoEConfig(**merged_args))
+        model = get_ft_model(model, collaboration_strategy) 
+    else:   
+        raise ValueError("Unknown model type")
     return model
+
+def init_server_model(override_args):
+    if args.base_model.startswith("gpt"):
+        server = Server(args, GPT, config = override_args)
+    elif "llama" in args.base_model:
+        from models.modeling_llama_moe_hf import LlamaMoEForCausalLM
+        from models.configuration_llama_moe import LlamaMoEConfig
+        server = Server(args, LlamaMoEForCausalLM, LlamaMoEConfig(**override_args))
+    elif "SmolLM" in args.base_model:
+        from models.modeling_llama_moe_hf import LlamaMoEForCausalLM
+        from models.configuration_llama_moe import LlamaMoEConfig
+        smollm_args = {
+            "bos_token_id": 0,
+            "eos_token_id": 0,
+            "hidden_size": 960,
+            "intermediate_size": 2560,
+            "max_position_embeddings": 2048,
+            "num_attention_heads": 15,
+            "num_hidden_layers": 32,
+            "num_key_value_heads": 5,
+            "rope_theta": 10000.0,
+            "vocab_size": 49152
+        }
+        merged_args = {**smollm_args, **override_args}
+        server = Server(args, LlamaMoEForCausalLM, LlamaMoEConfig(**merged_args))
+    else:   
+        raise ValueError("Unknown model type")
+    return server
 
 def set_seed(seed):
     torch.manual_seed(seed)
@@ -86,44 +142,48 @@ set_seed(args.seed)
 
 if args.wandb_log:
     import wandb
-    wandb.init(project=args.wandb_project, name=args.wandb_run_name, config=vars(args))
+    wandb.init(project=args.wandb_project, entity='ec-llm', name=args.wandb_run_name, config=vars(args))
     
 print('=============== initializing clients and server')
 acc_steps = args.batch_size // args.micro_batch_size
 clients = {}
-for i in range(args.num_clients):
+for client_id in range(args.num_clients):
     override_args = dict(
-        expert_num = args.expert_numbers[i],
-        lora_rank = args.expert_lora_ranks[i],
+        expert_num = args.expert_numbers[client_id],
+        lora_rank = args.expert_lora_ranks[client_id],
         lora_dropout = args.lora_dropout,
-        topk_exp = min(args.topk,args.expert_numbers[i]),
+        topk_exp = min(args.topk,args.expert_numbers[client_id]),
         load_balancing_lambda = args.lb_lambda,
         pruning_lambda = args.p_lambda,
         pruning_strength = args.pruning_strength,
         pruning = args.is_pruning,
         expert0_importance = args.expert0_importance,
         is_no_router = args.is_no_router,
-        device = args.device)
-    clients[i] = GeneralClient(
+        device = f'cuda:{client_id % num_gpus}' if num_gpus > 1 else 'cuda')
+    clients[client_id] = GeneralClient(
         args=args,
-        client_id=i,
+        client_id=client_id,
         model=init_client_model, 
         data_path = os.path.join(args.data_path,str(args.num_clients)), 
         output_dir = args.output_dir,
-        override_args = override_args)
+        override_args = override_args,
+        is_shifted=args.base_model.startswith("gpt"),
+        dtype=np.uint16 if args.base_model.startswith("gpt") else np.uint32)
 server_override_args = dict(
     expert_num = min(args.expert_numbers),
     lora_rank = max(args.expert_lora_ranks),
     topk_exp = args.topk,
     is_no_router = args.is_no_router,
-    device = args.device)
-server = Server(args, GPT, config = server_override_args)
+    device = 'cpu')
+server = init_server_model(server_override_args)
 
 print('=============== collaborative finetuning')
 for epoch in tqdm(range(args.num_global_rounds)):
+    print(f"Starting training of epoch: {epoch}")
     for id in range(args.num_clients):
         clients[id].synchronize(server.server_model, collaboration_strategy, aggregation_strategy, id)
         clients[id].train(acc_steps = acc_steps, local_num_steps = args.num_local_steps)
+        print(f"Locally trained client: {id}")
     with torch.no_grad():
         server.aggregate_parameters([clients[i].model for i in range(args.num_clients)], collaboration_strategy, aggregation_strategy, [clients[i].num_train_samples for i in range(args.num_clients)])
 if args.save_model == True:

@@ -159,7 +159,6 @@ class HetLoraAggregationStrategy(AggregationStrategy):
                     self.adaptive_weights[name] = 0
                 self.adaptive_weights[name] += torch.norm(parameter, p='fro')
 
-
     def to_update(self, name, client_data, client_rank):
         if name in self.adaptive_weights:
             return self.all_updated_weights[client_rank][name] * torch.norm(self.all_updated_weights[client_rank][name], p='fro') / self.adaptive_weights[name]

@@ -14,8 +14,12 @@ def to_collaboration_strategy(strategy):
         return AllCollaborationStrategy()
     elif strategy == 'expert_0':
         return Expert0CollaborationStrategy()
+    elif strategy == 'expert_01':
+        return Expert01CollaborationStrategy()
     elif strategy == 'ffalora':
-        return Expert0CollaborationStrategy()
+        return FFALoRACollaborationStrategy()
+    elif strategy == 'fedsalora':
+        return FedSaLoRACollaborationStrategy()
     elif strategy == 'experts':
         return ExpertCollaborationStrategy()
     else:
@@ -78,18 +82,44 @@ class ExpertCollaborationStrategy(CollaborationStrategy):
     
     def is_client_specific(self, name):
         return any(infix in name for infix in self._client_specific())
-    
-class FAALoRACollaborationStrategy(CollaborationStrategy):
+
+class FFALoRACollaborationStrategy(CollaborationStrategy):
     def __init__(self):
-        super(AllCollaborationStrategy, self).__init__()
-        self.OPT_PARAMS = [ "lora_B",  GATE ]
-        self.name = "all"
+        super(FFALoRACollaborationStrategy, self).__init__()
+        self.name = "ffalora"
+        self.OPT_PARAMS = [ LORA,  GATE ]
+        self.CLIENT_SPECIFIC = [ GATE ]
     
     def _client_specific(self):
         return []
-
+    
     def _optimized(self):
-        return self.OPT_PARAMS
+        raise NotImplementedError()
+
+    def is_optimized(self, name):
+        return any(infix in name for infix in self.OPT_PARAMS) and not ("experts" in name and "lora_A" in name)
+
+    def is_global_model(self, name):
+        return (self.is_optimized(name) and not self.is_client_specific(name)) or ("experts" in name and "lora_A" in name)
+    
+class FedSaLoRACollaborationStrategy(CollaborationStrategy):
+    def __init__(self):
+        super(FedSaLoRACollaborationStrategy, self).__init__()
+        self.name = "fedsalora"
+        self.OPT_PARAMS = [ LORA,  GATE ]
+        self.CLIENT_SPECIFIC = [ GATE ]
+    
+    def _client_specific(self):
+        return []
+    
+    def _optimized(self):
+        raise NotImplementedError()
+
+    def is_optimized(self, name):
+        return any(infix in name for infix in self.OPT_PARAMS)
+
+    def is_global_model(self, name):
+        return (self.is_optimized(name) and not self.is_client_specific(name)) or ("experts" in name and "lora_A" in name)
     
 class Expert0CollaborationStrategy(CollaborationStrategy):
     def __init__(self):
@@ -110,3 +140,23 @@ class Expert0CollaborationStrategy(CollaborationStrategy):
         should return Export_X (X>=1) LoRA weights and Gating weights
         """
         return any(infix in name for infix in self.OPT_PARAMS) and not EXPERT_0 in name and not "attn" in name
+    
+class Expert01CollaborationStrategy(CollaborationStrategy):
+    def __init__(self):
+        super(Expert01CollaborationStrategy, self).__init__()
+        self.CLIENT_SPECIFIC = [ GATE ]
+        self.OPT_PARAMS = [ LORA ] + self.CLIENT_SPECIFIC
+        self.name = "expert_01"
+
+    def _client_specific(self):
+        return self.CLIENT_SPECIFIC
+
+    def _optimized(self):
+        return self.OPT_PARAMS
+
+    def is_client_specific(self, name):
+        """
+        Returns whether weight is client specific, 
+        should return Export_X (X>=1) LoRA weights and Gating weights
+        """
+        return any(infix in name for infix in self.OPT_PARAMS) and not (EXPERT_0 in name or EXPERT_1 in name) and not "attn" in name

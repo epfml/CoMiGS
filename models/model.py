@@ -162,7 +162,6 @@ class GPTConfig:
     global_routing: bool = False 
     straight_through: bool = False
     is_per_token: bool = True
-    router_lr_scaling: float = 1.0
     topk_exp: int = 2
     router_depth: int = 2 # only supportd for MLP router
     expert0_importance: float = 0.5
@@ -362,8 +361,6 @@ class GPT(nn.Module):
             config_args['is_per_token'] = override_args['is_per_token']
         if 'is_no_router' in override_args:
             config_args['is_no_router'] = override_args['is_no_router']
-        if 'router_lr_scaling' in override_args:
-            config_args['router_lr_scaling'] = override_args['router_lr_scaling']
         if 'topk_exp' in override_args:
             config_args['topk_exp'] = override_args['topk_exp']
         if 'router_depth' in override_args:
@@ -443,7 +440,7 @@ class GPT(nn.Module):
             module_factor += 4
         return lora_factor, module_factor
 
-    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type, is_alternating = True):
+    def configure_optimizers(self, weight_decay, learning_rate, learning_rate_scaling, betas, device_type, is_alternating = True):
         """
         This long function is unfortunately doing something very simple and is being very defensive:
         We are separating out all parameters of the model into two buckets: those that will experience
@@ -488,7 +485,7 @@ class GPT(nn.Module):
                 {"params": [param_dict[pn] for pn in sorted(list(no_decay))], "weight_decay": 0.0, "lr": learning_rate},
             ]
             router_optim_groups = [
-                {"params": [param_dict[pn] for pn in sorted(list(router_decay))],"weight_decay": weight_decay, "lr": self.config.router_lr_scaling * learning_rate},
+                {"params": [param_dict[pn] for pn in sorted(list(router_decay))],"weight_decay": weight_decay, "lr": learning_rate},
             ]
             # new PyTorch nightly has a new 'fused' option for AdamW that is much faster
             use_fused = (device_type == 'cuda') and ('fused' in inspect.signature(torch.optim.AdamW).parameters)
@@ -551,7 +548,7 @@ class GPT(nn.Module):
             {"params": [param_dict[pn] for pn in sorted(list(no_decay))], "weight_decay": 0.0, "lr": learning_rate},
         ]
         router_optim_groups = [
-            {"params": [param_dict[pn] for pn in sorted(list(router_decay))],"weight_decay": weight_decay, "lr": self.config.router_lr_scaling * learning_rate},
+            {"params": [param_dict[pn] for pn in sorted(list(router_decay))],"weight_decay": weight_decay, "lr": learning_rate_scaling * learning_rate},
         ]
         # new PyTorch nightly has a new 'fused' option for AdamW that is much faster
         use_fused = (device_type == 'cuda') and ('fused' in inspect.signature(torch.optim.AdamW).parameters)

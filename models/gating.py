@@ -234,7 +234,7 @@ class MoE(nn.Module):
     def _track_expert_activations(self, indices, num_experts):
         num_used_experts = 1 if indices.dim() == 1 else indices.size(1)
         if self.expert_activation is None:
-            self.expert_activation = torch.zeros((num_experts,), device=indices.device)
+            self.expert_activation = torch.zeros((num_experts,), device=indices.device, requires_grad=False)
         for j in range(num_used_experts):
             index = indices if indices.dim() == 1 else indices[:, j]
             self.expert_activation[:].scatter_add_(0, index, torch.ones_like(index).float())
@@ -243,7 +243,7 @@ class MoE(nn.Module):
         top_scores = nn.functional.softmax(gate_logits,dim=1)
 
         if self.expert_scores_sum is None:
-            self.expert_scores_sum = torch.zeros(num_experts, device=top_scores.device, dtype=torch.float)
+            self.expert_scores_sum = torch.zeros(num_experts, device=top_scores.device, dtype=torch.float, requires_grad=False)
             self.expert_counts = 0
 
         expert_indices = torch.arange(num_experts, device=top_scores.device).view(1, -1).expand(top_scores.size(0), -1)
@@ -255,7 +255,7 @@ class MoE(nn.Module):
         top_indices = torch.argmax(gate_logits, dim=1)
 
         if self.expert_max_scores is None:
-            self.expert_max_scores = torch.zeros(num_experts, device=top_scores.device, dtype=torch.float)
+            self.expert_max_scores = torch.zeros(num_experts, device=top_scores.device, dtype=torch.float, requires_grad=False)
             self.expert_token_indices = [[] for _ in range(num_experts)]
 
         max_scores, _ = torch.max(top_scores, dim=0)
